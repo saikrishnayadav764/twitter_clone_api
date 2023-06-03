@@ -6,7 +6,8 @@ const sqlite3 = require("sqlite3");
 const bcrypt = require("bcrypt");
 const dbPath = path.join(__dirname, "twitterClone.db");
 const jwt = require("jsonwebtoken");
-const format = require("date-fns/format");
+// const format = require("date-fns/format");
+
 let db;
 
 const server = async () => {
@@ -20,7 +21,7 @@ server();
 app.use(express.json());
 
 // API 1
-app.post("/register", async (req, res) => {
+app.post("/register/", async (req, res) => {
   const { username, password, name, gender } = req.body;
   let query = `SELECT * FROM user WHERE username = '${username}'`;
   let result = await db.get(query);
@@ -35,7 +36,8 @@ app.post("/register", async (req, res) => {
       let pass = await bcrypt.hash(password, 10);
       query = `INSERT INTO user(name, username, password, gender) 
           VALUES ('${name}', '${username}', '${pass}',' ${gender}')`;
-      result = await db.run(query);
+      let result = await db.run(query);
+      res.send(result);
       res.status(200);
       res.send("User created successfully");
     }
@@ -91,13 +93,13 @@ const authenticate = async (req, res, next) => {
 app.get("/user/tweets/feed/", authenticate, async (req, res) => {
   let query = `SELECT user_id FROM user WHERE username = '${req.username}'`;
   let result = await db.get(query);
-  let user_id = result.user_id;
+  const { user_id } = result;
   query = `SELECT following_user_id FROM follower WHERE follower_user_id=${user_id}`;
   result = await db.all(query);
-  query = `SELECT username, tweet,date_time AS dateTime FROM tweet LEFT JOIN
-   user ON tweet.user_id = user.user_id WHERE user.user_id<>-1`;
+  query = `SELECT username, tweet,date_time AS dateTime FROM tweet INNER JOIN
+   user ON tweet.user_id = user.user_id WHERE tweet.user_id<>${user_id}`;
   result.map((obj) => {
-    query += ` OR user.user_id=${obj.following_user_id}`;
+    query += ` OR tweet.user_id=${obj.following_user_id}`;
   });
   query += ` ORDER BY date_time DESC LIMIT 4 OFFSET 0`;
   result = await db.all(query);
@@ -111,7 +113,7 @@ app.get("/user/following", authenticate, async (req, res) => {
   let user_id = result.user_id;
   query = `SELECT following_user_id FROM follower WHERE follower_user_id=${user_id}`;
   result = await db.all(query);
-  query = `SELECT username FROM user WHERE user_id<>-1`;
+  query = `SELECT username FROM user WHERE user_id<>${user_id}`;
   result.map((obj) => {
     query += ` OR user_id=${obj.following_user_id}`;
   });
@@ -126,9 +128,9 @@ app.get("/user/followers", authenticate, async (req, res) => {
   let user_id = result.user_id;
   query = `SELECT follower_user_id FROM follower WHERE following_user_id=${user_id}`;
   result = await db.all(query);
-  query = `SELECT username FROM user WHERE user_id<>-1`;
+  query = `SELECT username FROM user WHERE user_id<>${user_id}`;
   result.map((obj) => {
-    query += ` OR user_id=${obj.follower_user_id}`;
+    query += ` OR user_id=${obj.follower_id}`;
   });
   result = await db.all(query);
   res.send(result);
@@ -152,7 +154,7 @@ app.get("/tweets/:tweetId/", authenticate, async (req, res) => {
     return obj.tweet_id == tweetId;
   });
   if (!is_there) {
-    res.status(400);
+    res.status(401);
     res.send("Invalid Request");
   } else {
     query = `SELECT tweet, coalesce(COUNT(DISTINCT like_id),0) AS likes, coalesce(COUNT(DISTINCT reply_id),0) AS replies, date_time AS dateTime FROM tweet 
@@ -184,7 +186,7 @@ app.get("/tweets/:tweetId/likes/", authenticate, async (req, res) => {
   });
   //   console.log(is_there);
   if (!is_there) {
-    res.status(400);
+    res.status(401);
     res.send("Invalid Request");
   } else {
     query = `SELECT DISTINCT username,like_id FROM like
@@ -206,6 +208,7 @@ app.get("/tweets/:tweetId/replies/", authenticate, async (req, res) => {
   let user_id = result.user_id;
   query = `SELECT following_user_id FROM follower WHERE follower_user_id=${user_id}`;
   result = await db.all(query);
+  console.log(result);
   query = `SELECT tweet_id FROM tweet  WHERE user_id<>-1`;
   result.map((obj) => {
     query += ` OR user_id=${obj.following_user_id}`;
@@ -218,7 +221,7 @@ app.get("/tweets/:tweetId/replies/", authenticate, async (req, res) => {
   });
   //   console.log(is_there);
   if (!is_there) {
-    res.status(400);
+    res.status(401);
     res.send("Invalid Request");
   } else {
     query = `SELECT DISTINCT username as name,reply FROM reply
@@ -252,15 +255,14 @@ app.post("/user/tweets/", authenticate, async (req, res) => {
   let result = await db.get(query);
   let user_id = result.user_id;
   const { tweet } = req.body;
-  const myDate = format(new Date(), "yyyy-MM-dd HH-MM-SS").toString();
-  query = `INSERT INTO tweet(tweet, user_id, date_time)
-    VALUES('${tweet}', '${user_id}', '${myDate}')`;
+  query = `INSERT INTO tweet(tweet, user_id)
+    VALUES('${tweet}', '${user_id}')`;
   await db.run(query);
   res.send("Created a Tweet");
 });
 
 // API 11
-app.delete("/tweets/:tweetId/", authenticate, async (req, res) => {
+app.delete("/tweets/:tweetId", authenticate, async (req, res) => {
   const { tweetId } = req.params;
   let query = `SELECT user_id FROM user WHERE username = '${req.username}'`;
   let result = await db.get(query);
@@ -271,11 +273,11 @@ app.delete("/tweets/:tweetId/", authenticate, async (req, res) => {
     return obj.tweet_id == tweetId;
   });
   if (is_its_user) {
-    query = `DELETE FROM tweet where tweet_id=${tweetID}`;
+    query = `DELETE FROM tweet where tweet_id=${tweetId}`;
     result = await db.run(query);
     res.send("Tweet Removed");
   } else {
-    res.status(400);
+    res.status(401);
     res.send("Invalid Request");
   }
 });
